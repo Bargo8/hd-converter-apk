@@ -1,1 +1,151 @@
+name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Create App Files
+      run: |
+        mkdir -p app/src/main/java/com/bargo/hdrconverter
+        mkdir -p app/src/main/assets
+        
+        # Bikin AndroidManifest.xml
+        cat << 'EOF' > app/src/main/AndroidManifest.xml
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.bargo.hdrconverter">
+            <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+            <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+            <application android:allowBackup="true" android:label="HDR Tool" android:theme="@style/Theme.AppCompat.NoActionBar">
+                <activity android:name=".MainActivity" android:exported="true">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        EOF
 
+        # Bikin MainActivity.java
+        cat << 'EOF' > app/src/main/java/com/bargo/hdrconverter/MainActivity.java
+        package com.bargo.hdrconverter;
+        import androidx.appcompat.app.AppCompatActivity;
+        import android.os.Bundle;
+        import android.webkit.WebView;
+        import android.webkit.JavascriptInterface;
+        import android.widget.Toast;
+        import com.arthenica.ffmpegkit.FFmpegKit;
+        import com.arthenica.ffmpegkit.ReturnCode;
+
+        public class MainActivity extends AppCompatActivity {
+            private WebView webView;
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+                webView = new WebView(this);
+                setContentView(webView);
+                webView.getSettings().setJavaScriptEnabled(true);
+                webView.addJavascriptInterface(new WebAppInterface(), "AndroidInterface");
+                webView.loadUrl("file:///android_asset/index.html");
+            }
+            public class WebAppInterface {
+                @JavascriptInterface
+                public void runFFmpeg() {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Mulai proses...", Toast.LENGTH_SHORT).show());
+                    String inputFile = "/storage/emulated/0/Download/video.mp4"; 
+                    String outputFile = "/storage/emulated/0/Download/video_HDR.mp4";
+                    String command = "-y -i " + inputFile + " -vf scale=1920:1080:flags=lanczos,curves=preset=lighter,format=yuv420p10le -c:v libx265 -preset ultrafast -crf 22 -x265-params hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc -c:a copy " + outputFile;
+
+                    FFmpegKit.executeAsync(command, session -> {
+                        ReturnCode returnCode = session.getReturnCode();
+                        if (ReturnCode.isSuccess(returnCode)) {
+                            webView.post(() -> webView.evaluateJavascript("updateLog('Selesai!')", null));
+                        } else {
+                            webView.post(() -> webView.evaluateJavascript("updateLog('Gagal!')", null));
+                        }
+                    }, log -> {
+                        String message = log.getMessage();
+                        webView.post(() -> webView.evaluateJavascript("updateLog('" + message.replace("'", "\\'").replace("\n", " ") + "')", null));
+                    }, statistics -> {});
+                }
+            }
+        }
+        EOF
+
+        # Bikin index.html
+        cat << 'EOF' > app/src/main/assets/index.html
+        <!DOCTYPE html>
+        <html>
+        <head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="background:#121212;color:white;font-family:sans-serif;padding:20px;">
+            <h2>HDR Converter</h2>
+            <button onclick="window.AndroidInterface.runFFmpeg()" style="background:#2d7a52;color:white;padding:15px;width:100%;border:none;border-radius:8px;font-size:16px;">Proses Video HDR</button>
+            <div id="log" style="background:#000;padding:10px;height:300px;overflow-y:scroll;margin-top:20px;font-family:monospace;color:#0f0;">Menunggu...</div>
+            <script>
+                function updateLog(text) { document.getElementById('log').innerHTML += "<br>> " + text; }
+            </script>
+        </body>
+        </html>
+        EOF
+
+        # Bikin build.gradle (app)
+        cat << 'EOF' > app/build.gradle
+        plugins { id 'com.android.application' }
+        android {
+            namespace 'com.bargo.hdrconverter'
+            compileSdk 33
+            defaultConfig {
+                applicationId "com.bargo.hdrconverter"
+                minSdk 24
+                targetSdk 33
+                versionCode 1
+                versionName "1.0"
+            }
+        }
+        dependencies {
+            implementation 'androidx.appcompat:appcompat:1.6.1'
+            implementation 'com.arthenica:ffmpeg-kit-full:6.0-2.LTS'
+        }
+        EOF
+
+        # Bikin build.gradle (root)
+        cat << 'EOF' > build.gradle
+        buildscript {
+            repositories { google(); mavenCentral() }
+            dependencies { classpath 'com.android.tools.build:gradle:8.1.0' }
+        }
+        allprojects { repositories { google(); mavenCentral() } }
+        EOF
+
+        # Bikin settings.gradle
+        cat << 'EOF' > settings.gradle
+        include ':app'
+        EOF
+
+        # Bikin gradle.properties
+        cat << 'EOF' > gradle.properties
+        android.useAndroidX=true
+        org.gradle.jvmargs=-Xmx2048m
+        EOF
+
+    - name: Make gradlew executable
+      run: chmod +x gradlew || true
+      
+    - name: Build with Gradle
+      run: gradle wrapper --gradle-version 8.1.1 && ./gradlew assembleDebug
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: HDR-Converter-APK
+        path: app/build/outputs/apk/debug/app-debug.apk
