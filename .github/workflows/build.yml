@@ -135,7 +135,7 @@ jobs:
       run: chmod +x gradlew || true
       
     - name: Build with Gradle
-      run: gradle wrapper --gradle-version 8.1.1 && ./gradlew assembleDebug
+      run: gradle wrapper --gradle-version 8.2 && ./gradlew assembleDebug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
