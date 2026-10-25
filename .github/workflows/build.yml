@@ -13,7 +13,7 @@ jobs:
         distribution: 'temurin'
         
     - name: Setup Android SDK
-      uses: android-actions/setup-android@v4
+      uses: android-actions/setup-android@v3
       
     - name: Create App Files
       run: |
@@ -130,12 +130,23 @@ jobs:
         android.useAndroidX=true
         org.gradle.jvmargs=-Xmx2048m
         EOF
+        
+        mkdir -p gradle/wrapper
+        cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
+        distributionBase=GRADLE_USER_HOME
+        distributionPath=wrapper/dists
+        zipStoreBase=GRADLE_USER_HOME
+        zipStorePath=wrapper/dists
+        distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-bin.zip
+        EOF
 
-    - name: Make gradlew executable
+    - name: Grant execute permission for gradlew
       run: chmod +x gradlew || true
       
     - name: Build with Gradle
-      run: gradle wrapper --gradle-version 8.2 && ./gradlew assembleDebug
+      uses: gradle/gradle-build-action@v2
+      with:
+        arguments: assembleDebug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
